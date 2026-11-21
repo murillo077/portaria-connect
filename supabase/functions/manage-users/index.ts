@@ -224,6 +224,18 @@ Deno.serve(async (req) => {
         return response({ error: "Não é possível excluir o último administrador ativo." }, 400);
       }
 
+      // Preserva o histórico de encomendas: não exclui contas referenciadas pelas entregas.
+      const { count: deliveryReferences, error: referenceError } = await adminClient
+        .from("deliveries")
+        .select("id", { count: "exact", head: true })
+        .or(`received_by.eq.${userId},collected_by.eq.${userId}`);
+      if (referenceError) throw referenceError;
+      if ((deliveryReferences ?? 0) > 0) {
+        return response({
+          error: "Este funcionário possui encomendas vinculadas ao histórico. Para preservar os registros, bloqueie o acesso em vez de excluir a conta.",
+        }, 409);
+      }
+
       const { error } = await adminClient.auth.admin.deleteUser(userId);
       if (error) throw error;
       return response({ message: "Funcionário excluído." });
