@@ -30,3 +30,20 @@
 .summary-caption{display:block;color:#8a9990;font-size:9px;margin-top:8px}
 @media(max-width:900px){.analytics-grid{grid-template-columns:1fr}}
 @media(max-width:650px){.period-toolbar{align-items:flex-start;flex-direction:column}.period-options{width:100%}.period-option{flex:1;padding:8px 5px}.bar-chart{gap:7px}}
+
+
+/* Gestão de funcionários */
+select{width:100%;border:1px solid #dce5e0;border-radius:10px;padding:12px 13px;outline:none;color:#1a3029;background:#fff;font:inherit}
+select:focus{border-color:#3a9b78;box-shadow:0 0 0 3px #3a9b7818}
+.user-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}
+.danger-btn{display:flex;align-items:center;gap:6px;border:1px solid #f0d4d1;background:#fff8f7;color:#b83e36;border-radius:8px;padding:8px 10px;font-size:10px;font-weight:700}
+.danger-btn:hover{background:#fff0ee}
+.check-line{display:flex;align-items:center;gap:9px}
+.check-line input{width:16px;height:16px;accent-color:#17664e}
+@media(max-width:650px){.user-actions{width:100%;justify-content:flex-start;margin-left:55px}.user-actions button{font-size:9px;padding:7px 8px}}
+
+/* Ajustes finais da navegação e da equipe */
+.nav-item{width:100%;border:0;background:transparent;text-align:left;cursor:pointer}
+.nav-item:not(.active):hover{background:#183b32;color:#fff}
+.user-actions{flex:0 0 auto}
+@media(max-width:900px){.nav-item{font-size:0!important}.nav-item svg{flex:none}}
