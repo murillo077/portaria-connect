@@ -225,12 +225,13 @@ Deno.serve(async (req) => {
       }
 
       // Preserva o histórico de encomendas: não exclui contas referenciadas pelas entregas.
-      const { count: deliveryReferences, error: referenceError } = await adminClient
-        .from("deliveries")
-        .select("id", { count: "exact", head: true })
-        .or(`received_by.eq.${userId},collected_by.eq.${userId}`);
-      if (referenceError) throw referenceError;
-      if ((deliveryReferences ?? 0) > 0) {
+      const [{ count: receivedReferences, error: receivedError }, { count: collectedReferences, error: collectedError }] = await Promise.all([
+        adminClient.from("deliveries").select("id", { count: "exact", head: true }).eq("received_by", userId),
+        adminClient.from("deliveries").select("id", { count: "exact", head: true }).eq("collected_by", userId),
+      ]);
+      if (receivedError) throw receivedError;
+      if (collectedError) throw collectedError;
+      if ((receivedReferences ?? 0) + (collectedReferences ?? 0) > 0) {
         return response({
           error: "Este funcionário possui encomendas vinculadas ao histórico. Para preservar os registros, bloqueie o acesso em vez de excluir a conta.",
         }, 409);
