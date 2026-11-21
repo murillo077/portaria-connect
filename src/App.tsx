@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { supabase, isSupabaseConfigured, type Delivery } from './lib/supabase'
-import { Package, Search, Plus, LogOut, LayoutDashboard, Clock3, CheckCircle2, Camera, X, Building2, UserRound, ArrowDownToLine, Boxes, RefreshCw, AlertCircle } from 'lucide-react'
+import { Package, Search, Plus, LogOut, LayoutDashboard, Clock3, CheckCircle2, Camera, X, Building2, Boxes, RefreshCw, AlertCircle, CalendarDays, TrendingUp } from 'lucide-react'
 
 type Profile = { full_name: string; role: string; condominium_id: string }
 const dateTime = (value: string) => new Date(value).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
@@ -18,6 +18,7 @@ export default function App() {
   const [notice, setNotice] = useState('')
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<'all' | 'received' | 'collected'>('all')
+  const [period, setPeriod] = useState<'7' | '30' | 'all'>('7')
   const [modal, setModal] = useState(false)
   const [saving, setSaving] = useState(false)
   const [photo, setPhoto] = useState<File | null>(null)
@@ -37,7 +38,7 @@ export default function App() {
       setLoading(true); setError('')
       const { data: p, error: pError } = await supabase!.from('profiles').select('full_name, role, condominium_id').eq('id', session.user.id).single()
       if (pError) { if (active) { setError('Seu usuário ainda não está vinculado a um condomínio. Peça ao administrador para concluir seu cadastro no banco de dados.'); setLoading(false) } return }
-      const { data, error: dError } = await supabase!.from('deliveries').select('*').order('received_at', { ascending: false })
+      const { data, error: dError } = await supabase!.from('deliveries').select('*').eq('condominium_id', p.condominium_id).order('received_at', { ascending: false })
       if (!active) return
       if (dError) setError(dError.message)
       setProfile(p); setDeliveries(data || []); setLoading(false)
@@ -48,16 +49,37 @@ export default function App() {
 
   const refresh = async () => {
     if (!supabase) return
-    const { data, error: e } = await supabase.from('deliveries').select('*').order('received_at', { ascending: false })
+    const { data, error: e } = await supabase.from('deliveries').select('*').eq('condominium_id', profile?.condominium_id || '').order('received_at', { ascending: false })
     if (e) setError(e.message); else setDeliveries(data || [])
   }
 
-  const visible = useMemo(() => deliveries.filter(d => {
+  const visible = useMemo(() => periodDeliveries.filter(d => {
     const text = [d.recipient_name, d.block, d.apartment, d.description || ''].join(' ').toLowerCase()
     return text.includes(query.toLowerCase()) && (filter === 'all' || d.status === filter)
-  }), [deliveries, query, filter])
+  }), [periodDeliveries, query, filter])
+  const periodDeliveries = useMemo(() => {
+    if (period === 'all') return deliveries
+    const days = Number(period)
+    const from = new Date()
+    from.setHours(0, 0, 0, 0)
+    from.setDate(from.getDate() - (days - 1))
+    return deliveries.filter(d => new Date(d.received_at) >= from)
+  }, [deliveries, period])
   const pending = deliveries.filter(d => d.status === 'received').length
-  const collected = deliveries.filter(d => d.status === 'collected').length
+  const collected = periodDeliveries.filter(d => d.status === 'collected').length
+  const chartDays = useMemo(() => Array.from({ length: 7 }, (_, index) => {
+    const day = new Date()
+    day.setHours(0, 0, 0, 0)
+    day.setDate(day.getDate() - (6 - index))
+    const next = new Date(day)
+    next.setDate(next.getDate() + 1)
+    const count = deliveries.filter(d => {
+      const received = new Date(d.received_at)
+      return received >= day && received < next
+    }).length
+    return { label: day.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', ''), count }
+  }), [deliveries])
+  const maxChartCount = Math.max(1, ...chartDays.map(day => day.count))
 
   const authenticate = async (e: FormEvent) => {
     e.preventDefault(); if (!supabase) return
@@ -105,7 +127,26 @@ export default function App() {
     <main className="main"><header className="topbar"><div><p className="eyebrow">PAINEL DA PORTARIA</p><h2>Visão geral</h2></div><div className="top-actions"><span className="live-dot">● Sistema conectado</span><button className="icon-btn" onClick={refresh} title="Atualizar"><RefreshCw size={18}/></button><button className="primary" onClick={() => setModal(true)}><Plus size={18}/> Nova encomenda</button></div></header>
       {error && <div className="alert"><AlertCircle size={18}/>{error}<button onClick={() => setError('')}><X size={16}/></button></div>}{notice && <div className="notice-bar">{notice}<button onClick={() => setNotice('')}><X size={16}/></button></div>}
       <section className="welcome"><div><span className="welcome-tag">CONTROLE DE RECEBIMENTOS</span><h1>Olá, {profile?.full_name?.split(' ')[0] || 'bem-vindo'} 👋</h1><p>Acompanhe as encomendas recebidas no condomínio.</p></div><div className="welcome-icon"><Building2 size={42}/></div></section>
-      <section className="stats"><Stat icon={<Boxes/>} label="Total de encomendas" value={deliveries.length} tone="blue"/><Stat icon={<Clock3/>} label="Aguardando retirada" value={pending} tone="orange"/><Stat icon={<CheckCircle2/>} label="Entregues ao morador" value={collected} tone="green"/></section>
+      <div className="period-toolbar">
+        <div className="period-heading"><CalendarDays size={17}/><span>Indicadores do período</span></div>
+        <div className="period-options">
+          {(['7', '30', 'all'] as const).map(value => <button key={value} className={period === value ? 'period-option selected' : 'period-option'} onClick={() => setPeriod(value)}>{value === '7' ? '7 dias' : value === '30' ? '30 dias' : 'Todo o período'}</button>)}
+        </div>
+      </div>
+      <section className="stats"><Stat icon={<Boxes/>} label="Encomendas no período" value={periodDeliveries.length} tone="blue"/><Stat icon={<Clock3/>} label="Aguardando retirada" value={pending} tone="orange"/><Stat icon={<CheckCircle2/>} label="Retiradas no período" value={collected} tone="green"/></section>
+      <section className="analytics-grid">
+        <div className="panel chart-panel">
+          <div className="panel-head"><div><h3>Recebimentos nos últimos 7 dias</h3><p>Volume de encomendas registradas por dia.</p></div><div className="chart-mark"><TrendingUp size={18}/></div></div>
+          <div className="bar-chart">{chartDays.map((day, index) => <div className="bar-column" key={index}><strong>{day.count}</strong><div className="bar-track"><div className="bar-fill" style={{ height: (day.count / maxChartCount * 100) + '%' }}/></div><span>{day.label}</span></div>)}</div>
+        </div>
+        <div className="panel summary-panel">
+          <div className="panel-head"><div><h3>Situação das encomendas</h3><p>Resumo de todas as encomendas.</p></div></div>
+          <div className="status-summary"><div className="summary-line"><span><i className="summary-dot waiting"/>Aguardando retirada</span><strong>{pending}</strong></div><div className="summary-line"><span><i className="summary-dot collected"/>Retiradas</span><strong>{deliveries.filter(d => d.status === 'collected').length}</strong></div></div>
+          <div className="summary-total"><span>Total registrado</span><strong>{deliveries.length}</strong></div>
+          <div className="summary-progress"><div style={{ width: (deliveries.length ? deliveries.filter(d => d.status === 'collected').length / deliveries.length * 100 : 0) + '%' }}/></div>
+          <small className="summary-caption">{deliveries.length ? Math.round(deliveries.filter(d => d.status === 'collected').length / deliveries.length * 100) : 0}% das encomendas foram retiradas</small>
+        </div>
+      </section>
       <section className="panel"><div className="panel-head"><div><h3>Encomendas</h3><p>Consulte e atualize as entregas do condomínio.</p></div><button className="outline" onClick={() => setModal(true)}><Plus size={16}/> Registrar</button></div><div className="toolbar"><div className="search"><Search size={18}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar por morador, bloco ou apartamento..."/></div><div className="filters">{(['all','received','collected'] as const).map(f => <button key={f} className={filter === f ? 'filter active-filter' : 'filter'} onClick={() => setFilter(f)}>{f === 'all' ? 'Todas' : f === 'received' ? 'Pendentes' : 'Retiradas'}</button>)}</div></div>
         {loading ? <div className="empty"><RefreshCw className="spin"/> Carregando encomendas...</div> : visible.length === 0 ? <div className="empty"><Package size={34}/><strong>Nenhuma encomenda encontrada</strong><span>Quando uma nova entrega chegar, registre por aqui.</span></div> : <div className="delivery-list">{visible.map(d => <article className="delivery-row" key={d.id}><div className="parcel-icon"><Package size={21}/></div><div className="delivery-info"><strong>{d.recipient_name}</strong><span>Bloco {d.block} · Apartamento {d.apartment}</span><small>{d.description || 'Encomenda'} · Recebida em {dateTime(d.received_at)}</small></div><div className="delivery-status"><span className={d.status === 'received' ? 'status pending' : 'status done'}>{d.status === 'received' ? 'Aguardando retirada' : 'Retirada concluída'}</span>{d.status === 'collected' && d.collected_at && <small>{dateTime(d.collected_at)}</small>}</div>{d.status === 'received' && <button className="collect-btn" onClick={() => collect(d)}><CheckCircle2 size={16}/> Confirmar retirada</button>}</article>)}</div>}
       </section><footer>PORTARIA CONNECT · Gestão inteligente de encomendas</footer>
