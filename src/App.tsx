@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { supabase, isSupabaseConfigured, type Delivery } from './lib/supabase'
 import { Package, Search, Plus, LogOut, LayoutDashboard, Clock3, CheckCircle2, Camera, X, Building2, Boxes, RefreshCw, AlertCircle, CalendarDays, TrendingUp, Users, UserPlus, UserCheck, UserX } from 'lucide-react'
 
-type Profile = { full_name: string; role: string; condominium_id: string }
-type ManagedUser = { id: string; full_name: string; role: string; active: boolean; created_at: string }
+type Profile = { full_name: string; role: string; condominium_id: string; active: boolean }
+type ManagedUser = { id: string; full_name: string; email: string; role: 'admin' | 'guard'; active: boolean; created_at: string }
 const dateTime = (value: string) => new Date(value).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 
 export default function App() {
@@ -28,7 +28,9 @@ export default function App() {
   const [users, setUsers] = useState<ManagedUser[]>([])
   const [usersLoading, setUsersLoading] = useState(false)
   const [userSaving, setUserSaving] = useState(false)
-  const [newUser, setNewUser] = useState({ full_name: '', email: '', password: '' })
+  const [newUser, setNewUser] = useState({ full_name: '', email: '', password: '', role: 'guard' as 'admin' | 'guard' })
+  const [editingUser, setEditingUser] = useState<ManagedUser | null>(null)
+  const [editForm, setEditForm] = useState({ full_name: '', email: '', password: '', role: 'guard' as 'admin' | 'guard', active: true })
 
   useEffect(() => {
     if (!supabase) { setLoading(false); return }
@@ -42,8 +44,9 @@ export default function App() {
     let active = true
     const load = async () => {
       setLoading(true); setError('')
-      const { data: p, error: pError } = await supabase!.from('profiles').select('full_name, role, condominium_id').eq('id', session.user.id).single()
-      if (pError) { if (active) { setError('Seu usuário ainda não está vinculado a um condomínio. Peça ao administrador para concluir seu cadastro no banco de dados.'); setLoading(false) } return }
+      const { data: p, error: pError } = await supabase!.from('profiles').select('full_name, role, condominium_id, active').eq('id', session.user.id).single()
+      if (pError || !p) { if (active) { setError('Seu usuário ainda não está vinculado a um condomínio. Peça ao administrador para concluir seu cadastro.'); setLoading(false) } return }
+      if (p.active === false) { if (active) { setError('Sua conta está desativada. Procure o administrador do condomínio.'); setLoading(false); await supabase!.auth.signOut() } return }
       const { data, error: dError } = await supabase!.from('deliveries').select('*').eq('condominium_id', p.condominium_id).order('received_at', { ascending: false })
       if (!active) return
       if (dError) setError(dError.message)
@@ -67,11 +70,11 @@ export default function App() {
     e.preventDefault()
     if (!supabase) return
     setUserSaving(true); setError(''); setNotice('')
-    const { data, error: e2 } = await supabase.functions.invoke('manage-users', { body: { action: 'create', ...newUser } })
+    const { data, error: e2 } = await supabase.functions.invoke('manage-users', { body: { action: 'create', fullName: newUser.full_name, email: newUser.email, password: newUser.password, role: newUser.role } })
     if (e2 || data?.error) setError(data?.error || e2?.message || 'Não foi possível cadastrar o funcionário.')
     else {
       setNotice('Funcionário cadastrado com sucesso.')
-      setNewUser({ full_name: '', email: '', password: '' })
+      setNewUser({ full_name: '', email: '', password: '', role: 'guard' })
       await loadUsers()
     }
     setUserSaving(false)
@@ -79,12 +82,33 @@ export default function App() {
 
   const toggleGuard = async (user: ManagedUser) => {
     if (!supabase) return
-    const { data, error: e } = await supabase.functions.invoke('manage-users', { body: { action: 'update_status', user_id: user.id, active: !user.active } })
+    const { data, error: e } = await supabase.functions.invoke('manage-users', { body: { action: 'toggle', userId: user.id, active: !user.active } })
     if (e || data?.error) setError(data?.error || e?.message || 'Não foi possível alterar o acesso.')
     else {
       setNotice(user.active ? 'Acesso do funcionário desativado.' : 'Acesso do funcionário ativado.')
       await loadUsers()
     }
+  }
+
+
+  const saveUser = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!supabase || !editingUser) return
+    setUserSaving(true); setError(''); setNotice('')
+    const { data, error: invokeError } = await supabase.functions.invoke('manage-users', {
+      body: { action: 'update', userId: editingUser.id, fullName: editForm.full_name, email: editForm.email, password: editForm.password || undefined, role: editForm.role, active: editForm.active }
+    })
+    if (invokeError || data?.error) setError(data?.error || invokeError?.message || 'Não foi possível atualizar o funcionário.')
+    else { setNotice('Funcionário atualizado com sucesso.'); setEditingUser(null); await loadUsers() }
+    setUserSaving(false)
+  }
+
+  const deleteUser = async (user: ManagedUser) => {
+    if (!supabase || !window.confirm('Excluir permanentemente o acesso de ' + user.full_name + '?')) return
+    setError(''); setNotice('')
+    const { data, error: invokeError } = await supabase.functions.invoke('manage-users', { body: { action: 'delete', userId: user.id } })
+    if (invokeError || data?.error) setError(data?.error || invokeError?.message || 'Não foi possível excluir o funcionário.')
+    else { setNotice('Funcionário excluído.'); await loadUsers() }
   }
 
   useEffect(() => { if (view === 'users' && profile?.role === 'admin') loadUsers() }, [view, profile?.role])
@@ -95,10 +119,6 @@ export default function App() {
     if (e) setError(e.message); else setDeliveries(data || [])
   }
 
-  const visible = useMemo(() => periodDeliveries.filter(d => {
-    const text = [d.recipient_name, d.block, d.apartment, d.description || ''].join(' ').toLowerCase()
-    return text.includes(query.toLowerCase()) && (filter === 'all' || d.status === filter)
-  }), [periodDeliveries, query, filter])
   const periodDeliveries = useMemo(() => {
     if (period === 'all') return deliveries
     const days = Number(period)
@@ -107,6 +127,10 @@ export default function App() {
     from.setDate(from.getDate() - (days - 1))
     return deliveries.filter(d => new Date(d.received_at) >= from)
   }, [deliveries, period])
+  const visible = useMemo(() => periodDeliveries.filter(d => {
+    const text = [d.recipient_name, d.block, d.apartment, d.description || ''].join(' ').toLocaleLowerCase('pt-BR')
+    return text.includes(query.trim().toLocaleLowerCase('pt-BR')) && (filter === 'all' || d.status === filter)
+  }), [periodDeliveries, query, filter])
   const pending = deliveries.filter(d => d.status === 'received').length
   const collected = periodDeliveries.filter(d => d.status === 'collected').length
   const chartDays = useMemo(() => Array.from({ length: 7 }, (_, index) => {
@@ -201,18 +225,32 @@ export default function App() {
           <label>Nome completo<input required value={newUser.full_name} onChange={e => setNewUser({ ...newUser, full_name: e.target.value })} placeholder="Nome e sobrenome"/></label>
           <label>E-mail de acesso<input type="email" required value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} placeholder="funcionario@email.com"/></label>
           <label>Senha inicial<input type="password" required minLength={8} value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} placeholder="Mínimo de 8 caracteres"/></label>
+          <label>Perfil de acesso<select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value as 'admin' | 'guard' })}><option value="guard">Funcionário da portaria</option><option value="admin">Administrador</option></select></label>
           <button className="primary" type="submit" disabled={userSaving}><UserPlus size={17}/>{userSaving ? ' Cadastrando...' : ' Cadastrar funcionário'}</button>
         </form>
         <div className="panel-head"><div><h3>Equipe cadastrada</h3><p>{users.length} usuário(s) vinculado(s) a este condomínio.</p></div></div>
         {usersLoading ? <div className="empty"><RefreshCw className="spin"/> Carregando funcionários...</div> : users.length === 0 ? <div className="empty">Nenhum funcionário encontrado.</div> : <div className="delivery-list">{users.map(u => <article className="delivery-row" key={u.id}>
-          <div className="parcel-icon"><Users size={20}/></div><div className="delivery-info"><strong>{u.full_name}</strong><span>{u.role === 'admin' ? 'Administrador' : 'Funcionário da portaria'}</span><small>{u.created_at ? 'Cadastrado em ' + new Date(u.created_at).toLocaleDateString('pt-BR') : ''}</small></div>
+          <div className="parcel-icon"><Users size={20}/></div><div className="delivery-info"><strong>{u.full_name}</strong><span>{u.email || 'E-mail não informado'} · {u.role === 'admin' ? 'Administrador' : 'Funcionário da portaria'}</span><small>{u.created_at ? 'Cadastrado em ' + new Date(u.created_at).toLocaleDateString('pt-BR') : ''}</small></div>
           <div className="delivery-status"><span className={u.active ? 'status done' : 'status pending'}>{u.active ? 'Acesso ativo' : 'Acesso desativado'}</span></div>
-          {u.role === 'guard' && <button className="collect-btn" onClick={() => toggleGuard(u)}>{u.active ? <UserX size={16}/> : <UserCheck size={16}/>}{u.active ? ' Desativar' : ' Ativar'}</button>}
+          <div className="user-actions"><button className="collect-btn" onClick={() => { setEditingUser(u); setEditForm({ full_name: u.full_name, email: u.email || '', password: '', role: u.role, active: u.active }) }}>Editar</button>{u.id !== session.user.id && <button className="collect-btn" onClick={() => toggleGuard(u)}>{u.active ? <UserX size={16}/> : <UserCheck size={16}/>}{u.active ? ' Bloquear' : ' Desbloquear'}</button>}{u.id !== session.user.id && <button className="danger-btn" onClick={() => deleteUser(u)}>Excluir</button>}</div>
         </article>)}</div>}
       </section>}
       <footer>PORTARIA CONNECT · Gestão inteligente de encomendas</footer>
     </main>
-    {modal && <div className="modal-backdrop" onMouseDown={e => {if(e.target === e.currentTarget) setModal(false)}}><form className="modal" onSubmit={addDelivery}><div className="modal-head"><div><span className="eyebrow">NOVO REGISTRO</span><h2>Registrar encomenda</h2></div><button type="button" className="icon-btn" onClick={() => setModal(false)}><X/></button></div><label>Nome completo do morador<input required value={form.recipient_name} onChange={e => setForm({...form, recipient_name:e.target.value})} placeholder="Nome e sobrenome"/></label><div className="two-cols"><label>Bloco<input required value={form.block} onChange={e => setForm({...form, block:e.target.value})} placeholder="Ex.: A"/></label><label>Apartamento<input required value={form.apartment} onChange={e => setForm({...form, apartment:e.target.value})} placeholder="Ex.: 102"/></label></div><label>Descrição (opcional)<input value={form.description} onChange={e => setForm({...form, description:e.target.value})} placeholder="Ex.: Caixa, envelope, mercado..."/></label><label className="upload"><Camera size={20}/><span><strong>{photo ? photo.name : 'Adicionar foto da encomenda'}</strong><small>Imagem JPG, PNG ou WEBP (máx. 8 MB)</small></span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => setPhoto(e.target.files?.[0] || null)}/></label>{photo && <button type="button" className="text-button" onClick={() => setPhoto(null)}>Remover foto</button>}<button className="primary full" disabled={saving}>{saving ? 'Salvando...' : 'Registrar recebimento'}</button></form></div>}
+
+    {editingUser && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget && !userSaving) setEditingUser(null) }}>
+      <form className="modal" onSubmit={saveUser}>
+        <div className="modal-head"><div><span className="eyebrow">GESTÃO DE ACESSO</span><h2>Editar funcionário</h2></div><button type="button" className="icon-btn" disabled={userSaving} onClick={() => setEditingUser(null)}><X/></button></div>
+        <label>Nome completo<input required value={editForm.full_name} onChange={e => setEditForm({ ...editForm, full_name: e.target.value })}/></label>
+        <label>E-mail<input type="email" required value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })}/></label>
+        <label>Nova senha (opcional)<input type="password" minLength={8} value={editForm.password} onChange={e => setEditForm({ ...editForm, password: e.target.value })} placeholder="Deixe em branco para manter"/></label>
+        <label>Perfil<select value={editForm.role} onChange={e => setEditForm({ ...editForm, role: e.target.value as 'admin' | 'guard' })}><option value="guard">Funcionário da portaria</option><option value="admin">Administrador</option></select></label>
+        <label className="check-line"><input type="checkbox" checked={editForm.active} onChange={e => setEditForm({ ...editForm, active: e.target.checked })}/> Conta ativa</label>
+        <button className="primary full" disabled={userSaving}>{userSaving ? 'Salvando...' : 'Salvar alterações'}</button>
+      </form>
+    </div>}
+
+        {modal && <div className="modal-backdrop" onMouseDown={e => {if(e.target === e.currentTarget) setModal(false)}}><form className="modal" onSubmit={addDelivery}><div className="modal-head"><div><span className="eyebrow">NOVO REGISTRO</span><h2>Registrar encomenda</h2></div><button type="button" className="icon-btn" onClick={() => setModal(false)}><X/></button></div><label>Nome completo do morador<input required value={form.recipient_name} onChange={e => setForm({...form, recipient_name:e.target.value})} placeholder="Nome e sobrenome"/></label><div className="two-cols"><label>Bloco<input required value={form.block} onChange={e => setForm({...form, block:e.target.value})} placeholder="Ex.: A"/></label><label>Apartamento<input required value={form.apartment} onChange={e => setForm({...form, apartment:e.target.value})} placeholder="Ex.: 102"/></label></div><label>Descrição (opcional)<input value={form.description} onChange={e => setForm({...form, description:e.target.value})} placeholder="Ex.: Caixa, envelope, mercado..."/></label><label className="upload"><Camera size={20}/><span><strong>{photo ? photo.name : 'Adicionar foto da encomenda'}</strong><small>Imagem JPG, PNG ou WEBP (máx. 8 MB)</small></span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => setPhoto(e.target.files?.[0] || null)}/></label>{photo && <button type="button" className="text-button" onClick={() => setPhoto(null)}>Remover foto</button>}<button className="primary full" disabled={saving}>{saving ? 'Salvando...' : 'Registrar recebimento'}</button></form></div>}
   </div>
 }
 
