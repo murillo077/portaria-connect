@@ -132,7 +132,15 @@ export default function App() {
     return text.includes(query.trim().toLocaleLowerCase('pt-BR')) && (filter === 'all' || d.status === filter)
   }), [periodDeliveries, query, filter])
   const pending = deliveries.filter(d => d.status === 'received').length
-  const collected = periodDeliveries.filter(d => d.status === 'collected').length
+  const collected = useMemo(() => {
+    if (period === 'all') return deliveries.filter(d => d.status === 'collected').length
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    start.setDate(start.getDate() - (Number(period) - 1))
+    return deliveries.filter(d =>
+      d.status === 'collected' && d.collected_at && new Date(d.collected_at) >= start
+    ).length
+  }, [deliveries, period])
   const chartDays = useMemo(() => Array.from({ length: 7 }, (_, index) => {
     const day = new Date()
     day.setHours(0, 0, 0, 0)
