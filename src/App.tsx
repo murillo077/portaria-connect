@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { supabase, isSupabaseConfigured, type Delivery } from './lib/supabase'
-import { Package, Search, Plus, LogOut, LayoutDashboard, Clock3, CheckCircle2, Camera, X, Building2, Boxes, RefreshCw, AlertCircle, CalendarDays, TrendingUp } from 'lucide-react'
+import { Package, Search, Plus, LogOut, LayoutDashboard, Clock3, CheckCircle2, Camera, X, Building2, Boxes, RefreshCw, AlertCircle, CalendarDays, TrendingUp, Users, UserPlus, UserCheck, UserX } from 'lucide-react'
 
 type Profile = { full_name: string; role: string; condominium_id: string }
+type ManagedUser = { id: string; full_name: string; role: string; active: boolean; created_at: string }
 const dateTime = (value: string) => new Date(value).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 
 export default function App() {
@@ -23,6 +24,11 @@ export default function App() {
   const [saving, setSaving] = useState(false)
   const [photo, setPhoto] = useState<File | null>(null)
   const [form, setForm] = useState({ recipient_name: '', block: '', apartment: '', description: '' })
+  const [view, setView] = useState<'dashboard' | 'users'>('dashboard')
+  const [users, setUsers] = useState<ManagedUser[]>([])
+  const [usersLoading, setUsersLoading] = useState(false)
+  const [userSaving, setUserSaving] = useState(false)
+  const [newUser, setNewUser] = useState({ full_name: '', email: '', password: '' })
 
   useEffect(() => {
     if (!supabase) { setLoading(false); return }
@@ -46,6 +52,42 @@ export default function App() {
     load()
     return () => { active = false }
   }, [session])
+
+
+  const loadUsers = async () => {
+    if (!supabase || profile?.role !== 'admin') return
+    setUsersLoading(true)
+    const { data, error: e } = await supabase.functions.invoke('manage-users', { body: { action: 'list' } })
+    if (e || data?.error) setError(data?.error || e?.message || 'Não foi possível carregar os usuários.')
+    else setUsers(data?.users || [])
+    setUsersLoading(false)
+  }
+
+  const createGuard = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!supabase) return
+    setUserSaving(true); setError(''); setNotice('')
+    const { data, error: e2 } = await supabase.functions.invoke('manage-users', { body: { action: 'create', ...newUser } })
+    if (e2 || data?.error) setError(data?.error || e2?.message || 'Não foi possível cadastrar o funcionário.')
+    else {
+      setNotice('Funcionário cadastrado com sucesso.')
+      setNewUser({ full_name: '', email: '', password: '' })
+      await loadUsers()
+    }
+    setUserSaving(false)
+  }
+
+  const toggleGuard = async (user: ManagedUser) => {
+    if (!supabase) return
+    const { data, error: e } = await supabase.functions.invoke('manage-users', { body: { action: 'update_status', user_id: user.id, active: !user.active } })
+    if (e || data?.error) setError(data?.error || e?.message || 'Não foi possível alterar o acesso.')
+    else {
+      setNotice(user.active ? 'Acesso do funcionário desativado.' : 'Acesso do funcionário ativado.')
+      await loadUsers()
+    }
+  }
+
+  useEffect(() => { if (view === 'users' && profile?.role === 'admin') loadUsers() }, [view, profile?.role])
 
   const refresh = async () => {
     if (!supabase) return
@@ -123,9 +165,10 @@ export default function App() {
   if (!isSupabaseConfigured) return <SetupScreen />
   if (!session) return <div className="auth-shell"><div className="auth-card"><div className="brand-mark"><Package size={27}/></div><p className="eyebrow">GESTÃO DE ENCOMENDAS</p><h1>PORTARIA <span>CONNECT</span></h1><p className="muted">Sua portaria mais organizada, segura e conectada.</p><form onSubmit={authenticate} className="stack">{authMode === 'signup' && <label>Nome completo<input required value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Seu nome"/></label>}<label>E-mail<input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="seu@email.com"/></label><label>Senha<input type="password" required minLength={6} value={password} onChange={e => setPassword(e.target.value)} placeholder="Mínimo de 6 caracteres"/></label><button className="primary full" type="submit">{authMode === 'login' ? 'Entrar na plataforma' : 'Criar conta'}</button></form>{error && <p className="error">{error}</p>}{notice && <p className="notice">{notice}</p>}<button className="text-button" onClick={() => {setAuthMode(authMode === 'login' ? 'signup' : 'login'); setError('')}}>{authMode === 'login' ? 'Primeiro acesso? Criar conta' : 'Já possui conta? Entrar'}</button></div></div>
 
-  return <div className="app-shell"><aside className="sidebar"><div className="logo"><div className="brand-mark"><Package/></div><div><strong>PORTARIA</strong><b>CONNECT</b></div></div><div className="side-label">MENU PRINCIPAL</div><div className="nav-item active"><LayoutDashboard size={18}/> Visão geral</div><div className="side-bottom"><div className="profile-mini"><div className="avatar">{profile?.full_name?.[0] || 'P'}</div><div><strong>{profile?.full_name || 'Usuário'}</strong><small>{profile?.role || 'Portaria'}</small></div></div><button className="logout" onClick={() => supabase?.auth.signOut()}><LogOut size={17}/> Sair</button></div></aside>
+  return <div className="app-shell"><aside className="sidebar"><div className="logo"><div className="brand-mark"><Package/></div><div><strong>PORTARIA</strong><b>CONNECT</b></div></div><div className="side-label">MENU PRINCIPAL</div><button className={view === 'dashboard' ? "nav-item active" : "nav-item"} onClick={() => setView('dashboard')}><LayoutDashboard size={18}/> Visão geral</button>{profile?.role === 'admin' && <button className={view === 'users' ? "nav-item active" : "nav-item"} onClick={() => setView('users')}><Users size={18}/> Funcionários</button>}<div className="side-bottom"><div className="profile-mini"><div className="avatar">{profile?.full_name?.[0] || 'P'}</div><div><strong>{profile?.full_name || 'Usuário'}</strong><small>{profile?.role || 'Portaria'}</small></div></div><button className="logout" onClick={() => supabase?.auth.signOut()}><LogOut size={17}/> Sair</button></div></aside>
     <main className="main"><header className="topbar"><div><p className="eyebrow">PAINEL DA PORTARIA</p><h2>Visão geral</h2></div><div className="top-actions"><span className="live-dot">● Sistema conectado</span><button className="icon-btn" onClick={refresh} title="Atualizar"><RefreshCw size={18}/></button><button className="primary" onClick={() => setModal(true)}><Plus size={18}/> Nova encomenda</button></div></header>
       {error && <div className="alert"><AlertCircle size={18}/>{error}<button onClick={() => setError('')}><X size={16}/></button></div>}{notice && <div className="notice-bar">{notice}<button onClick={() => setNotice('')}><X size={16}/></button></div>}
+      {view === 'dashboard' ? <>
       <section className="welcome"><div><span className="welcome-tag">CONTROLE DE RECEBIMENTOS</span><h1>Olá, {profile?.full_name?.split(' ')[0] || 'bem-vindo'} 👋</h1><p>Acompanhe as encomendas recebidas no condomínio.</p></div><div className="welcome-icon"><Building2 size={42}/></div></section>
       <div className="period-toolbar">
         <div className="period-heading"><CalendarDays size={17}/><span>Indicadores do período</span></div>
@@ -149,7 +192,25 @@ export default function App() {
       </section>
       <section className="panel"><div className="panel-head"><div><h3>Encomendas</h3><p>Consulte e atualize as entregas do condomínio.</p></div><button className="outline" onClick={() => setModal(true)}><Plus size={16}/> Registrar</button></div><div className="toolbar"><div className="search"><Search size={18}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar por morador, bloco ou apartamento..."/></div><div className="filters">{(['all','received','collected'] as const).map(f => <button key={f} className={filter === f ? 'filter active-filter' : 'filter'} onClick={() => setFilter(f)}>{f === 'all' ? 'Todas' : f === 'received' ? 'Pendentes' : 'Retiradas'}</button>)}</div></div>
         {loading ? <div className="empty"><RefreshCw className="spin"/> Carregando encomendas...</div> : visible.length === 0 ? <div className="empty"><Package size={34}/><strong>Nenhuma encomenda encontrada</strong><span>Quando uma nova entrega chegar, registre por aqui.</span></div> : <div className="delivery-list">{visible.map(d => <article className="delivery-row" key={d.id}><div className="parcel-icon"><Package size={21}/></div><div className="delivery-info"><strong>{d.recipient_name}</strong><span>Bloco {d.block} · Apartamento {d.apartment}</span><small>{d.description || 'Encomenda'} · Recebida em {dateTime(d.received_at)}</small></div><div className="delivery-status"><span className={d.status === 'received' ? 'status pending' : 'status done'}>{d.status === 'received' ? 'Aguardando retirada' : 'Retirada concluída'}</span>{d.status === 'collected' && d.collected_at && <small>{dateTime(d.collected_at)}</small>}</div>{d.status === 'received' && <button className="collect-btn" onClick={() => collect(d)}><CheckCircle2 size={16}/> Confirmar retirada</button>}</article>)}</div>}
-      </section><footer>PORTARIA CONNECT · Gestão inteligente de encomendas</footer>
+      </section>
+      <footer>PORTARIA CONNECT · Gestão inteligente de encomendas</footer>
+      </> : <section className="panel" style={{ marginTop: 24 }}>
+        <div className="panel-head"><div><h3>Gestão de funcionários</h3><p>Cadastre funcionários e controle o acesso à portaria.</p></div><button className="outline" onClick={loadUsers}><RefreshCw size={16}/> Atualizar lista</button></div>
+        <form className="stack" onSubmit={createGuard} style={{ maxWidth: 620, marginBottom: 28 }}>
+          <h3>Novo funcionário</h3>
+          <label>Nome completo<input required value={newUser.full_name} onChange={e => setNewUser({ ...newUser, full_name: e.target.value })} placeholder="Nome e sobrenome"/></label>
+          <label>E-mail de acesso<input type="email" required value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} placeholder="funcionario@email.com"/></label>
+          <label>Senha inicial<input type="password" required minLength={8} value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} placeholder="Mínimo de 8 caracteres"/></label>
+          <button className="primary" type="submit" disabled={userSaving}><UserPlus size={17}/>{userSaving ? ' Cadastrando...' : ' Cadastrar funcionário'}</button>
+        </form>
+        <div className="panel-head"><div><h3>Equipe cadastrada</h3><p>{users.length} usuário(s) vinculado(s) a este condomínio.</p></div></div>
+        {usersLoading ? <div className="empty"><RefreshCw className="spin"/> Carregando funcionários...</div> : users.length === 0 ? <div className="empty">Nenhum funcionário encontrado.</div> : <div className="delivery-list">{users.map(u => <article className="delivery-row" key={u.id}>
+          <div className="parcel-icon"><Users size={20}/></div><div className="delivery-info"><strong>{u.full_name}</strong><span>{u.role === 'admin' ? 'Administrador' : 'Funcionário da portaria'}</span><small>{u.created_at ? 'Cadastrado em ' + new Date(u.created_at).toLocaleDateString('pt-BR') : ''}</small></div>
+          <div className="delivery-status"><span className={u.active ? 'status done' : 'status pending'}>{u.active ? 'Acesso ativo' : 'Acesso desativado'}</span></div>
+          {u.role === 'guard' && <button className="collect-btn" onClick={() => toggleGuard(u)}>{u.active ? <UserX size={16}/> : <UserCheck size={16}/>}{u.active ? ' Desativar' : ' Ativar'}</button>}
+        </article>)}</div>}
+      </section>}
+      <footer>PORTARIA CONNECT · Gestão inteligente de encomendas</footer>
     </main>
     {modal && <div className="modal-backdrop" onMouseDown={e => {if(e.target === e.currentTarget) setModal(false)}}><form className="modal" onSubmit={addDelivery}><div className="modal-head"><div><span className="eyebrow">NOVO REGISTRO</span><h2>Registrar encomenda</h2></div><button type="button" className="icon-btn" onClick={() => setModal(false)}><X/></button></div><label>Nome completo do morador<input required value={form.recipient_name} onChange={e => setForm({...form, recipient_name:e.target.value})} placeholder="Nome e sobrenome"/></label><div className="two-cols"><label>Bloco<input required value={form.block} onChange={e => setForm({...form, block:e.target.value})} placeholder="Ex.: A"/></label><label>Apartamento<input required value={form.apartment} onChange={e => setForm({...form, apartment:e.target.value})} placeholder="Ex.: 102"/></label></div><label>Descrição (opcional)<input value={form.description} onChange={e => setForm({...form, description:e.target.value})} placeholder="Ex.: Caixa, envelope, mercado..."/></label><label className="upload"><Camera size={20}/><span><strong>{photo ? photo.name : 'Adicionar foto da encomenda'}</strong><small>Imagem JPG, PNG ou WEBP (máx. 8 MB)</small></span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => setPhoto(e.target.files?.[0] || null)}/></label>{photo && <button type="button" className="text-button" onClick={() => setPhoto(null)}>Remover foto</button>}<button className="primary full" disabled={saving}>{saving ? 'Salvando...' : 'Registrar recebimento'}</button></form></div>}
   </div>
