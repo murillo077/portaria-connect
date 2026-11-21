@@ -41,3 +41,9 @@ select:focus{border-color:#3a9b78;box-shadow:0 0 0 3px #3a9b7818}
 .check-line{display:flex;align-items:center;gap:9px}
 .check-line input{width:16px;height:16px;accent-color:#17664e}
 @media(max-width:650px){.user-actions{width:100%;justify-content:flex-start;margin-left:55px}.user-actions button{font-size:9px;padding:7px 8px}}
+
+/* Ajustes finais da navegação e da equipe */
+.nav-item{width:100%;border:0;background:transparent;text-align:left;cursor:pointer}
+.nav-item:not(.active):hover{background:#183b32;color:#fff}
+.user-actions{flex:0 0 auto}
+@media(max-width:900px){.nav-item{font-size:0!important}.nav-item svg{flex:none}}
